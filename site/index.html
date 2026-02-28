@@ -4,8 +4,198 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>dscs - home</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    
+    <div class="container">
+        <center>
+            <h1>dscs</h1>
+            <p>the awesomest decentralised chatroom</p>
+            <div id="auth-container">
+                <!-- login/signup forms -->
+                <div id="login-form">
+                    <h2>Login</h2>
+                    <input type="text" id="login-username" placeholder="username">
+                    <input type="password" id="login-password" placeholder="password">
+                    <button id="login-button">Login</button>
+                    <p>or <a href="#" id="show-signup">sign up</a></p>
+                </div>
+                <div id="signup-form" style="display:none;">
+                    <h2>Sign Up</h2>
+                    <input type="text" id="signup-username" placeholder="username">
+                    <input type="password" id="signup-password" placeholder="password">
+                    <button id="signup-button">Sign Up</button>
+                    <p>or <a href="#" id="show-login">login</a></p>
+                </div>
+            </div>
+            <div class="chatroom" id="chatroom" style="display:none;">
+                <!-- messages will be injected here -->
+                <input type="text" name="message" id="message-input" placeholder="type your message here...">
+                <input type="submit" value="send" id="send-button">
+            </div>
+            <h2>what is dscs?</h2>
+            <p>dscs is a decentralised chatroom built using web stuff. it allows users to chat with each other without relying on a server. it uses peer-to-peer technology to connect users directly, so you dont have to die.</p>
+            <h2>api</h2>
+            
+        </center>
+    </div>
+
+    <script>
+        // chat + auth system entirely client-side using localStorage/sessionStorage
+        (function() {
+            const channel = new BroadcastChannel('dscs-chat');
+            const chatroom = document.getElementById('chatroom');
+            const input = document.getElementById('message-input');
+            const sendButton = document.getElementById('send-button');
+            const loginForm = document.getElementById('login-form');
+            const signupForm = document.getElementById('signup-form');
+            const authContainer = document.getElementById('auth-container');
+
+            let currentUser = null; // {username, isAdmin}
+
+            function saveUsers(users) {
+                localStorage.setItem('dscs-users', JSON.stringify(users));
+            }
+            function loadUsers() {
+                return JSON.parse(localStorage.getItem('dscs-users')||'{}');
+            }
+
+            function setCurrentUser(user) {
+                currentUser = user;
+                sessionStorage.setItem('dscs-session', JSON.stringify(user));
+                renderAuthState();
+            }
+            function loadSession() {
+                const u = sessionStorage.getItem('dscs-session');
+                if (u) currentUser = JSON.parse(u);
+            }
+
+            function renderAuthState() {
+                if (currentUser) {
+                    authContainer.style.display = 'none';
+                    chatroom.style.display = '';
+                } else {
+                    authContainer.style.display = '';
+                    chatroom.style.display = 'none';
+                }
+            }
+
+            function addMessage(username, text, isOwn=false, id=null) {
+                const msg = document.createElement('div');
+                msg.className = 'message';
+                if (id) msg.dataset.id = id;
+                const userSpan = document.createElement('span');
+                userSpan.className = 'username';
+                userSpan.textContent = username + ':';
+                const textSpan = document.createElement('span');
+                textSpan.className = 'text';
+                textSpan.textContent = text;
+                msg.appendChild(userSpan);
+                msg.appendChild(document.createTextNode(' '));
+                msg.appendChild(textSpan);
+                if (currentUser && currentUser.isAdmin) {
+                    const del = document.createElement('button');
+                    del.textContent = '×';
+                    del.style.marginLeft = '8px';
+                    del.addEventListener('click', () => {
+                        const mid = msg.dataset.id;
+                        channel.postMessage({ type: 'delete', id: mid });
+                        msg.remove();
+                    });
+                    msg.appendChild(del);
+                }
+                chatroom.insertBefore(msg, input);
+                chatroom.scrollTop = chatroom.scrollHeight;
+            }
+
+            function broadcastMessage(username, message) {
+                const id = Date.now() + Math.random();
+                channel.postMessage({type:'message', id, username, message});
+                return id;
+            }
+
+            sendButton.addEventListener('click', () => {
+                if (!currentUser) return;
+                const message = input.value.trim();
+                if (!message) return;
+                const id = broadcastMessage(currentUser.username, message);
+                input.value = '';
+                addMessage(currentUser.username, message, true, id);
+            });
+
+            input.addEventListener('keypress', e => {
+                if (e.key === 'Enter') {
+                    sendButton.click();
+                    e.preventDefault();
+                }
+            });
+
+            channel.addEventListener('message', ev => {
+                const data = ev.data;
+                if (data.type === 'message') {
+                    if (!currentUser || data.username !== currentUser.username) {
+                        addMessage(data.username, data.message, false, data.id);
+                    }
+                } else if (data.type === 'delete') {
+                    const elems = chatroom.querySelectorAll(`.message[data-id="${data.id}"]`);
+                    elems.forEach(el => el.remove());
+                }
+            });
+
+            // login/signup handlers
+            document.getElementById('login-button').addEventListener('click', () => {
+                const user = document.getElementById('login-username').value.trim();
+                const pass = document.getElementById('login-password').value;
+                const users = loadUsers();
+                if (users[user] && users[user].password === pass) {
+                    setCurrentUser({username:user, isAdmin: users[user].isAdmin});
+                } else {
+                    alert('invalid credentials');
+                }
+            });
+            document.getElementById('signup-button').addEventListener('click', () => {
+                const user = document.getElementById('signup-username').value.trim();
+                const pass = document.getElementById('signup-password').value;
+                if (!user || !pass) return;
+                const users = loadUsers();
+                if (users[user]) { alert('username taken'); return; }
+                // first user ever becomes admin
+                const isAdmin = Object.keys(users).length === 0;
+                users[user] = {password: pass, isAdmin};
+                saveUsers(users);
+                setCurrentUser({username:user, isAdmin});
+            });
+            document.getElementById('show-signup').addEventListener('click', e => {
+                e.preventDefault();
+                loginForm.style.display = 'none';
+                signupForm.style.display = '';
+            });
+            document.getElementById('show-login').addEventListener('click', e => {
+                e.preventDefault();
+                signupForm.style.display = 'none';
+                loginForm.style.display = '';
+            });
+
+            // restore session
+            loadSession();
+            renderAuthState();
+
+            // message history
+            window.addEventListener('load', () => {
+                const history = JSON.parse(sessionStorage.getItem('dscs-history')||'[]');
+                history.forEach(m => addMessage(m.username, m.message, false, m.id));
+            });
+            window.addEventListener('beforeunload', () => {
+                const msgs = [];
+                chatroom.querySelectorAll('.message').forEach(div => {
+                    const user = div.querySelector('.username').textContent.replace(':','');
+                    const text = div.querySelector('.text').textContent;
+                    const id = div.dataset.id;
+                    msgs.push({username:user,message:text,id});
+                });
+                sessionStorage.setItem('dscs-history', JSON.stringify(msgs));
+            });
+        })();
+    </script>
 </body>
 </html>
